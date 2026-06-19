@@ -1,0 +1,154 @@
+# RedevOps.io Social Autopilot - Docker Compose Configuration
+# Self-hostable AI Agent Platform for SME Content Creation, Scheduling & Engagement
+
+version: "3.8"
+
+services:
+  # ============================================
+  # OSS Core: Postiz (Social Media Management)
+  # ============================================
+  postiz-db:
+    image: postgres:15-alpine
+    container_name: postiz-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postiz}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postiz_password}
+      POSTGRES_DB: ${POSTGRES_DB:-postiz}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postiz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autopilot-network
+
+  postiz-redis:
+    image: redis:7-alpine
+    container_name: postiz-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autopilot-network
+
+  postiz-backend:
+    image: ghcr.io/gitroomhq/postiz-app-server:latest
+    container_name: postiz-backend
+    depends_on:
+      postiz-db:
+        condition: service_healthy
+      postiz-redis:
+        condition: service_healthy
+    environment:
+      # Database
+      DB_HOST: postiz-db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-postiz}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postiz_password}
+      DB_NAME: ${POSTGRES_DB:-postiz}
+      
+      # Redis
+      REDIS_HOST: postiz-redis
+      REDIS_PORT: 6379
+      
+      # JWT Secret (generate a strong one in production)
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-use-strong-secret}
+      
+      # Frontend URL
+      FRONTEND_URL: http://localhost:4455
+      
+    ports:
+      - "4455:3000"  # Postiz backend port mapping
+    volumes:
+      - postiz_uploads:/app/uploads
+    networks:
+      - autopilot-network
+
+  postiz-frontend:
+    image: ghcr.io/gitroomhq/postiz-app:latest
+    container_name: postiz-frontend
+    depends_on:
+      - postiz-backend
+    environment:
+      NEXT_PUBLIC_BACKEND_URL: http://localhost:4455
+    ports:
+      - "4456:3000"  # Postiz frontend port mapping
+    networks:
+      - autopilot-network
+
+  # ============================================
+  # Agent Layer: AI Autopilot Services
+  # ============================================
+  agent-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: agent-api
+    environment:
+      # LLM Configuration
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MODEL: ${MODEL:-mistralai/mistral-large-2407}
+      
+      # Agent Settings
+      AGENT_LOG_LEVEL: ${AGENT_LOG_LEVEL:-INFO}
+      MAX_TOKENS: ${MAX_TOKENS:-4096}
+      TEMPERATURE: ${TEMPERATURE:-0.7}
+      
+      # Postiz Integration
+      POSTIZ_API_URL: http://postiz-backend:3000
+      POSTIZ_API_KEY: ${POSTIZ_API_KEY:-}
+      
+      # Security
+      API_SECRET_KEY: ${API_SECRET_KEY:-change-me-in-production}
+    ports:
+      - "8000:8000"  # Agent API (FastAPI)
+    volumes:
+      - ./agents:/app/agents
+      - agent_logs:/app/logs
+    networks:
+      - autopilot-network
+
+  # ============================================
+  # Optional: Local LLM with Ollama
+  # Uncomment to use local LLM instead of cloud API
+  # ============================================
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+  #   networks:
+  #     - autopilot-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  postiz_uploads:
+    driver: local
+  agent_logs:
+    driver: local
+  # ollama_data:
+  #   driver: local
+
+networks:
+  autopilot-network:
+    driver: bridge
