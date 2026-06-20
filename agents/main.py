@@ -6,7 +6,7 @@ Provides REST API endpoints for content creation, scheduling optimization,
 and engagement management.
 """
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -20,6 +20,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# ============================================
+# Authentication
+# ============================================
+
+API_SECRET_KEY = os.getenv("API_SECRET_KEY")
+
+if not API_SECRET_KEY:
+    logger.warning(
+        "API_SECRET_KEY is not set. Agent endpoints are UNAUTHENTICATED; "
+        "bind the service to localhost only and do not expose it publicly."
+    )
+
+
+async def require_api_key(x_api_key: Optional[str] = Header(None)) -> None:
+    """Enforce the X-API-Key header against API_SECRET_KEY.
+
+    If API_SECRET_KEY is unset, authentication is disabled and the service
+    must be run on localhost only (see startup warning).
+    """
+    if not API_SECRET_KEY:
+        return
+    if x_api_key != API_SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
 app = FastAPI(
     title="RedevOps.io Social Autopilot Agent API",
     description="Autonomous AI agents for social media management",
@@ -28,10 +53,18 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS middleware for frontend integration
+# CORS middleware for frontend integration.
+# Origins are restricted via the ALLOWED_ORIGINS env var (comma-separated).
+# Never combine a wildcard origin with credentials.
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately in production
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -112,7 +145,7 @@ async def health_check():
 # ============================================
 
 @app.post("/agents/content/create", response_model=ContentCreateResponse)
-async def create_content(request: ContentCreateRequest):
+async def create_content(request: ContentCreateRequest, _: None = Depends(require_api_key)):
     """
     Create social media content using AI agents.
     
@@ -146,7 +179,7 @@ async def create_content(request: ContentCreateRequest):
 
 
 @app.post("/agents/schedule/optimize", response_model=ScheduleOptimizeResponse)
-async def optimize_schedule(request: ScheduleOptimizeRequest):
+async def optimize_schedule(request: ScheduleOptimizeRequest, _: None = Depends(require_api_key)):
     """
     Optimize posting schedule using AI analysis.
     
@@ -177,7 +210,7 @@ async def optimize_schedule(request: ScheduleOptimizeRequest):
 
 
 @app.post("/agents/engagement/manage", response_model=EngagementResponse)
-async def manage_engagement(request: EngagementRequest):
+async def manage_engagement(request: EngagementRequest, _: None = Depends(require_api_key)):
     """
     Manage engagement for a specific post.
     
@@ -212,7 +245,7 @@ async def manage_engagement(request: EngagementRequest):
 # ============================================
 
 @app.get("/agents/status")
-async def get_agent_status():
+async def get_agent_status(_: None = Depends(require_api_key)):
     """Get status of all available agents."""
     return {
         "content_creator": {

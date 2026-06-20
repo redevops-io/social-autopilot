@@ -6,6 +6,7 @@ variations with appropriate tone, length, and hashtag suggestions.
 """
 
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -73,8 +74,6 @@ class ContentCreatorAgent:
     
     def _load_config(self):
         """Load LLM configuration from environment variables."""
-        import os
-        
         self.base_url = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
         self.api_key = os.getenv("OPENAI_API_KEY", "")
         self.model = os.getenv("MODEL", "mistralai/mistral-large-2407")
@@ -97,6 +96,10 @@ Requirements:
 
 Provide only the content, no explanations."""
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10)
+    )
     def _generate_with_llm(self, prompt: str) -> str:
         """Generate content using the configured LLM endpoint."""
         import httpx
@@ -130,10 +133,6 @@ Provide only the content, no explanations."""
             logger.error(f"LLM generation failed: {e}")
             raise
     
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10)
-    )
     async def create_content(
         self,
         topic: str,
